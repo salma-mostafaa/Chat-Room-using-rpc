@@ -1,6 +1,6 @@
 # Go RPC Chat
 
-A concurrent terminal chat app in Go using `net/rpc`. One server and many clients, each running as a separate process.
+A concurrent chat app in Go using `net/rpc`. One server and many clients, each running as a separate process. You can chat from the terminal or from the browser, and both kinds of users share the same chat room.
 
 ## Communication approach: Polling
 
@@ -11,6 +11,13 @@ Every 500 ms, each client calls `ChatServer.GetMessages` to fetch its pending me
 ```bash
 go run ./server        # terminal 1
 go run ./client        # terminal 2, 3, 4 ... (one per user)
+```
+
+To chat from the browser instead, run the web client and open http://localhost:8080:
+
+```bash
+go run ./webclient               # one browser user
+go run ./webclient -port 8081    # another browser user on a different port
 ```
 
 Client commands: `/users` lists online users, `/quit` leaves. Ctrl+C also leaves cleanly.
