@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Go RPC Chat</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #1a1b26;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", Menlo, monospace;
+    font-size: 15px;
+  }
+  .window {
+    width: min(860px, 100% - 24px); height: min(600px, 100% - 24px);
+    display: flex; flex-direction: column;
+    background: #0c0c0c; border: 1px solid #3b3d4a; border-radius: 8px; overflow: hidden;
+  }
+  .titlebar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; background: #24252f; color: #a9adc1; font-size: 13px;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .title { margin-left: 8px; }
+  #screen { flex: 1; overflow-y: auto; padding: 12px 14px; color: #cccccc; line-height: 1.45; }
+  .line { white-space: pre-wrap; word-break: break-word; }
+  .notice { color: #e5c07b; }
+  .error  { color: #f07178; }
+  .mine   { color: #6b7089; }
+  .time   { color: #6b7089; }
+  .name   { color: #7fd1e8; font-weight: bold; }
+  .inputline { display: flex; padding: 0 14px 12px; color: #cccccc; }
+  #prompt { white-space: pre; }
+  #input {
+    flex: 1; background: transparent; border: 0; outline: 0;
+    color: #ffffff; font: inherit; caret-color: #ffffff; padding: 0;
+  }
+  #input:disabled { display: none; }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <span class="dot" style="background:#ff5f56"></span>
+    <span class="dot" style="background:#ffbd2e"></span>
+    <span class="dot" style="background:#27c93f"></span>
+    <span class="title" id="title">go run ./client</span>
+  </div>
+  <div id="screen"></div>
+  <div class="inputline">
+    <span id="prompt">Enter your username: </span>
+    <input id="input" autocomplete="off" spellcheck="false" autofocus>
+  </div>
+</div>
+
+<script>
+const screen = document.getElementById("screen");
+const input  = document.getElementById("input");
+const prompt = document.getElementById("prompt");
+let joined = false;
+
+// print one line in the "terminal"; parts = [[text, cssClass], ...]
+function print(parts) {
+  const line = document.createElement("div");
+  line.className = "line";
+  for (const [text, cls] of parts) {
+    const span = document.createElement("span");
+    span.textContent = text;            // textContent = safe, no HTML injection
+    if (cls) span.className = cls;
+    line.append(span);
+  }
+  screen.append(line);
+  screen.scrollTop = screen.scrollHeight;
+}
+
+async function call(path, params) {
+  const res = await fetch(path, { method: "POST", body: new URLSearchParams(params || {}) });
+  return res.json();                    // { error: "...", data: ... }
+}
+
+function stop(text) {
+  joined = false;
+  print([[text, ""]]);
+  prompt.textContent = "";
+  input.disabled = true;
+}
+
+// Polling: ask for new messages every 500 ms (same as the terminal client)
+async function poll() {
+  if (!joined) return;
+  try {
+    const res = await call("/messages");
+    if (res.error) return stop("\nDisconnected from the server.");
+    for (const m of res.data || []) {
+      if (m.From === "SERVER") print([["[" + m.Time + "] ", "time"], ["*** " + m.Text, "notice"]]);
+      else print([["[" + m.Time + "] ", "time"], [m.From, "name"], [": " + m.Text, ""]]);
+    }
+  } catch (e) {
+    return stop("\nWeb client is not running.");
+  }
+  setTimeout(poll, 500);
+}
+
+input.addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter") return;
+  const text = input.value.trim();
+  input.value = "";
+
+  if (!joined) {                         // still choosing a username
+    print([["Enter your username: " + text, ""]]);
+    const res = await call("/join", { name: text });
+    if (res.error) return print([["Error: " + res.error, "error"]]);
+    joined = true;
+    document.getElementById("title").textContent = text + " - go run ./client";
+    print([["==================== Welcome " + text + " ====================", ""]]);
+    print([["Type a message and press Enter.  /users = online users,  /quit = leave", ""]]);
+    prompt.textContent = "> ";
+    poll();
+    return;
+  }
+
+  if (text === "") return;
+  print([["> " + text, "mine"]]);        // echo what you typed, like a terminal
+
+  if (text === "/quit") {
+    await call("/leave");
+    return stop("\nYou left the chat. Bye!");
+  }
+  if (text === "/users") {
+    const res = await call("/users");
+    if (res.error) return print([["Error: " + res.error, "error"]]);
+    return print([["Online (" + res.data.length + "): " + res.data.join(", "), ""]]);
+  }
+  const res = await call("/send", { text });
+  if (res.error) print([["Error: " + res.error, "error"]]);
+});
+
+// closing the tab/window = leave the chat
+window.addEventListener("pagehide", () => {
+  if (joined) navigator.sendBeacon("/leave");
+});
+
+document.querySelector(".window").addEventListener("click", () => input.focus());
+</script>
+</body>
+</html>
